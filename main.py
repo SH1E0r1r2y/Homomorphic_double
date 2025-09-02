@@ -1,33 +1,26 @@
 # main.py
-from package.Homo.paillier import system_keygen, gen_entity_key, encrypt_int, decrypt_int
+from package import Paillier
 
-def key_gen_paillierTA(bit_length=64):
-    syskeys = system_keygen(bit_length=bit_length)
-    N, N2 = syskeys["N"], syskeys["N2"]
-    g_enc  = syskeys["g_enc"]    # Paillier 用
-    g_core = syskeys["g_core"]   # 子群用
-    lam_dec = syskeys["lambda_dec"]
-    mu = syskeys["mu"]
-
+if __name__ == "__main__":
+    paillier = Paillier.keygen(K=64) # 64-bit 大小
     print("[*] System keys")
-    print(f"N bits ~= {N.bit_length()}")
-    print(f"g_core  = {g_core}")
-    print(f"g_enc   = {g_enc}   # should be N+1")
-    print(f"lambda_dec  = {lam_dec}")
-    print(f"mu      = {mu}")
+    print(f"N bits ~= {paillier.N.bit_length()}")
+    #print(f"g_core   = {paillier.g_core}")
+    print(f"g_enc    = {paillier.g_enc}   # should be N+1")
+    print(f"lambda_dec = {paillier.lambda_dec}")
+    #print(f"mu       = {paillier.mu}")
+    #print(f"repr     = {paillier!r}")
+    print(f"mu      = {paillier.mu}")
 
     # 產出節點的 (pk, sk_weak)
-    ent = gen_entity_key(N, N2, g_core)
+    ent = paillier.gen_entity_key(paillier.N, paillier.N2, paillier.g_core)
     print(f"pk_i    = (N, g_core, h_i) = {ent['pk']}")
     print(f"theta_i = {ent['sk_weak']}")
     print("\n[*] Encrypt/Decrypt demo with g_enc (N+1)")
-    # 簡單測試加解密
-    m = 15005467 % N
-    c = encrypt_int(m, N, N2, g_enc)   # 這裡用 g_enc
-    m_dec = decrypt_int(c, N, N2, lam_dec, mu)
+    m = 15005467 % paillier.N
+    c1,c2 = Paillier.encrypt(m, paillier.N, paillier.N2,paillier.g_enc,)
+    m_dec = Paillier.strong_decrypt(c1, paillier.N, paillier.N2, paillier.lam_dec, paillier.mu)
     print(f"m  = {m}")
-    print(f"c  = {c}")
+    print(f"c  = {c1}")
     print(f"m' = {m_dec}")
     assert m == m_dec, "解密錯誤：m != m'"
-if __name__ == "__main__":
-    key_gen_paillierTA(bit_length=64) # 示範用 64-bit
