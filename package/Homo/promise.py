@@ -59,7 +59,6 @@ class PedersenVSS:
         e0 = self.commit(a_coeffs[0], b_coeffs[0])
         es = [self.commit(a_coeffs[j], b_coeffs[j]) for j in range(1, t)]
 
-        # 分享
         shares = []
         for i in range(1, d + 1):
             si = sum(a_coeffs[j] * pow(i, j, self.q) for j in range(t)) % self.q
