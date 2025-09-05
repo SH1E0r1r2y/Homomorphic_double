@@ -6,7 +6,6 @@ def main():
     paillier = Paillier.keygen(K=64)
     print("[*] System keys")
     print("N bits ~= ", paillier.N.bit_length())
-    print("g_enc    =", paillier.g_enc)        # 應該等於 N + 1
     print("lambda_dec =", paillier.lambda_dec)
     print("mu      =", paillier.mu)
 
@@ -16,7 +15,7 @@ def main():
     theta_i = ent["sk_weak"]
 
     # 3) 加密 → 解密
-    m = 15005467 % N
+    m = 15005468827 % N
     C1, C2 = paillier.encrypt(m, h=h_i)
     m_strong = paillier.strong_decrypt(C1)
     m_weak = paillier.weak_decrypt(C1, C2, theta_i)

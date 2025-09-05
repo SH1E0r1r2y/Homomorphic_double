@@ -1,30 +1,29 @@
 # paillier.py
 import random
+from math import lcm
 from typing import Dict, Tuple
-from .utils import system_keygen, L, rand_coprime
+from .utils import modinv,L, rand_coprime, generate_strong_primes, find_g
 
 Cipher = Tuple[int, int]  # (C1, C2)
 
 class Paillier:
-    def __init__(self, n:int, n2:int, g_enc:int, g_core:int, lambda_dec:int, mu:int):
+    def __init__(self, n:int, n2:int, g_core:int, lambda_dec:int, mu:int):
         self.N = n
         self.N2 = n2
-        self.g_enc = g_enc       # 應為 N+1
-        self.g_core = g_core     # 子群生成元（論文 g）
+        self.g_core = g_core     # 子群生成元g
         self.lambda_dec = lambda_dec
         self.mu = mu
 
     @classmethod
     def keygen(cls, K: int = 64) -> "Paillier":
-        keys: Dict[str, int] = system_keygen(bit_length=K)
-        return cls(
-            n=keys["N"],
-            n2=keys["N2"],
-            g_enc=keys["g_enc"],
-            g_core=keys["g_core"],
-            lambda_dec=keys["lambda_dec"],
-            mu=keys["mu"],
-        )
+        p, q = generate_strong_primes(K)
+        lambda_dec  = lcm(p - 1, q - 1)        # ← λ
+        g_core, N, N2 = find_g(p, q, lambda_dec)
+        # μ = (L(g^λ mod N^2))^{-1} mod N
+        Lu = L(pow((N + 1) % N2, lambda_dec, N2), N)
+        mu = pow(Lu, -1, N)
+        return cls(n=N, n2=N2, g_core=g_core, lambda_dec=lambda_dec, mu=mu)
+
     # 產生一個實體的 (pk:(N, g_core, h), sk_weak:theta)
     def gen_entity_key(self, theta: int | None = None) -> Dict[str, Tuple[int, int, int]]:
         if theta is None:
@@ -50,11 +49,11 @@ class Paillier:
 
     # 弱私鑰解密：剝除 h^r，需要乘上 (C2^theta) 的模逆
     def weak_decrypt(self, C1: int, C2: int, theta_i: int) -> int:
-        inv = pow(pow(C2, theta_i, self.N2), -1, self.N2)
+        inv = modinv(pow(C2, theta_i, self.N2), self.N2)
         val = (C1 * inv) % self.N2
         return L(val,self.N)
 
-    # 重新隨機化（Ciphertext Refresh，不變明文）
+    # 重新隨機化（不變明文）
     def ciphertext_refresh(self, C: Cipher, h: int, r_prime: int | None = None) -> Cipher:
         if r_prime is None:
             r_prime = rand_coprime(self.N)
@@ -63,7 +62,7 @@ class Paillier:
         C2p = (C2 * pow(self.g_core, r_prime, self.N2)) % self.N2
         return (C1p, C2p)
 
-    # 同態加法（兩個同一公鑰下的密文）
+    # 兩個同一公鑰下的密文
     @staticmethod
     def homomorphic_add(Ca: Cipher, Cb: Cipher, N2: int) -> Cipher:
         C1a, C2a = Ca
