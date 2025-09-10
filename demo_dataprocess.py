@@ -31,7 +31,7 @@ def demo():
         print(f" doc{i}:", v)
 
     # 5) TF-IDF (float + int scaled)
-    tfidf_float, tfidf_int = compute_tfidf_vectors(vocab, docs, scale=10000)
+    tfidf_float, tfidf_int = compute_tfidf_vectors(vocab, docs, scale=100)
     print("\nTF-IDF (float) sample (first doc first 10 dims):")
     print(tfidf_float[0][:10])
     print("TF-IDF (scaled int) first doc (first 10 dims):")

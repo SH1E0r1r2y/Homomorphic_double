@@ -105,7 +105,7 @@ def encrypt_vector(paillier, h: int, vector: List[int]) -> List[Tuple[int,int]]:
         enc.append((c1, c2))
     return enc
 
-# ---- 還原（解密）向量 ----
+# ---- 還原（強解密）向量 ----
 def decrypt_vector_with_strong(paillier, enc_vector: List[Tuple[int,int]]) -> List[int]:
     res = []
     for (c1, _c2) in enc_vector:
