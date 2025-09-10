@@ -1,6 +1,8 @@
 # main.py
 from package.Homo.paillier import Paillier
 from package.Homo.promise import PedersenVSS
+from package.Homo.indextree import IndexTreeNode, build_index_tree
+
 
 def paillier_commit(t: int = 3, d: int = 5):
     # 1) 產生 Paillier 系統鑰（含 λ 與 θ_TA）
@@ -9,7 +11,7 @@ def paillier_commit(t: int = 3, d: int = 5):
     2) 使用系統公鑰 h_TA 進行加密
     3) 用 系統強私鑰(λ) 與 弱私鑰(theta_ta) 解密驗證
     """
-    paillier = Paillier.keygen(k=64)
+    paillier = Paillier.keygen(k=256)
     print("[*] System keys")
     print("N bits ~= ", paillier.n.bit_length())
 
@@ -51,7 +53,7 @@ def paillier_commit(t: int = 3, d: int = 5):
     for (i, si, vi) in shares_theta:
         assert vss.verify(i, si, vi, e0_theta, es_theta, t),   f"[θ] Share {i} 驗證失敗"
 
-    # 6) 將兩套 shares 依節點 i 配對（分配給節點 A_i）
+    # 6) 將 shares 依節點 i 配對（分配給節點 A_i）
     by_id = {i: {} for i in range(1, d + 1)}
     for (i, si, vi) in shares_lambda:
         by_id[i]["lambda_i"] = si
@@ -71,11 +73,25 @@ def paillier_commit(t: int = 3, d: int = 5):
     assert lam_rec == s_lambda, "λ 重建不相等"
     assert th_rec  == s_theta,  "θ 重建不相等"
 
+    # 聚合不同節點的 shares
+    idxs = list(by_id.keys())[:t]
+    shares_lambda = [(i, by_id[i]['lambda_i']) for i in idxs]
+    shares_theta  = [(i, by_id[i]['theta_i'])  for i in idxs]
+
+    # 重建秘密
+    lam_rec = vss.recover(shares_lambda, t)
+    th_rec  = vss.recover(shares_theta, t)
+
+
+    assert lam_rec == s_lambda, "λ重建不符"
+    assert th_rec  == s_theta, "θ重建不符"
+    print(f"[Test] 節點協作重建密鑰成功 (t={t})")
+
     # 8) 輸出摘要
     print("\n[*] Pedersen 承諾（系統強/弱私鑰）")
     print("E0_lambda =", e0_lambda)
     print("E0_theta  =", e0_theta)
-    print("[*] 係數承諾 Es_lambda 長度 =", len(es_lambda), ", Es_theta 長度 =", len(es_theta))
+    print("[*] 係數承諾 Es_lambda  =", len(es_lambda), ", Es_theta 長度 =", len(es_theta))
     print(f"[*] 已建立 {d} 份 shares，門檻 t = {t}")
     for i in range(1, d + 1):
         rec = by_id[i]
@@ -89,6 +105,49 @@ def paillier_commit(t: int = 3, d: int = 5):
         "node_shares": by_id
     }
 
-if __name__ == "__main__":
-    paillier_commit(t=3, d=5)
+def index_tree_demo():
+    # 1. 系統初始化（Paillier 公私鑰）
+    paillier = Paillier.keygen(k=64)
+    ent = paillier.gen_entity_key()
+    n, g_core, h_i = ent["pk"]
 
+    # 2. 模擬文件索引向量 (明文) —— 每個文件用長度=3 的向量表示
+    doc_vectors = [
+        [1, 0, 2],  # 文件1
+        [0, 1, 1],  # 文件2
+        [1, 1, 0],  # 文件3
+        [2, 0, 1],  # 文件4
+    ]
+
+    # 3. 加密向量
+    leaf_nodes = []
+    for doc_id, vec in enumerate(doc_vectors, start=1):
+        enc_vec = [paillier.encrypt(val, h=h_i) for val in vec]
+        leaf = IndexTreeNode(
+            node_id=f"doc-{doc_id}",
+            index_vector=enc_vec,
+            fid=doc_id
+        )
+        leaf_nodes.append(leaf)
+
+    # 4. 建立 index tree
+    root = build_index_tree(leaf_nodes, paillier.n2)
+
+    # 5. 輸出樹結構
+    def print_tree(node, depth=0):
+        indent = "  " * depth
+        if node.fid:
+            print(f"{indent}- Leaf Node {node.id}, fid={node.fid}")
+        else:
+            print(f"{indent}- Internal Node {node.id}")
+        if node.Pl:
+            print_tree(node.Pl, depth + 1)
+        if node.Pr:
+            print_tree(node.Pr, depth + 1)
+
+    print("[*] Index Tree 結構:")
+    print_tree(root)
+
+if __name__ == "__main__":
+    index_tree_demo()
+    paillier_commit(t=3, d=5)
