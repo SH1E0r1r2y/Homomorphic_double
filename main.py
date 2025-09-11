@@ -1,7 +1,7 @@
 # main.py
 from package.Homo.paillier import Paillier
 from package.Homo.promise import PedersenVSS
-from package.Homo.indextree import IndexTreeNode, build_index_tree
+from package.Dataprocess.indextree import IndexTreeNode, build_index_tree
 
 
 def paillier_commit(t: int = 3, d: int = 5):

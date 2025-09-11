@@ -8,7 +8,9 @@ Cipher = Tuple[int, int]  # (C1, C2)
 
 class Paillier:
     """Paillier"""
-    def __init__(self, n:int, n2:int, g_core:int, lambda_dec:int, theta_ta:int, h_ta:int, mu:int):
+    def __init__(self, p:int,q:int,n:int, n2:int, g_core:int, lambda_dec:int, theta_ta:int, h_ta:int, mu:int):
+        self.p = p
+        self.q = q
         self.n = n
         self.n2 = n2
         self.g_core = g_core     # 子群生成元g
@@ -21,14 +23,14 @@ class Paillier:
     def keygen(cls, k: int = 64) -> "Paillier":
         """產生金鑰"""
         p, q = generate_strong_primes(k)
-        lambda_dec  = lcm(p - 1, q - 1)//2        # ← λ
+        lambda_dec  = lcm(p - 1, q - 1)       # ← λ
         g_core, n, n2 = find_g(p, q, lambda_dec)
         # μ = (L(g^λ mod N^2))^{-1} mod N
         lu = L(pow((n + 1) % n2, lambda_dec, n2), n)
         mu = pow(lu, -1, n)
         theta_ta = random.randint(1, n // 4)
         h_ta = pow(g_core, theta_ta, n2)
-        return cls(n=n, n2=n2, g_core=g_core, lambda_dec=lambda_dec, theta_ta=theta_ta, h_ta=h_ta, mu=mu)
+        return cls(p=p,q=q,n=n, n2=n2, g_core=g_core, lambda_dec=lambda_dec, theta_ta=theta_ta, h_ta=h_ta, mu=mu)
 
     def gen_entity_key(self, theta: int | None = None) -> Dict[str, Tuple[int, int, int]]:
         """產生一個實體的 (pk:(N, g_core, h), sk_weak:theta)"""

@@ -10,14 +10,13 @@ def modinv(a: int, mod: int) -> int:
     return pow(a, -1, mod)
 
 def rand_coprime(modulus: int) -> int:
-    #取與 modulus 互質的整數，用來找隨機數 r ∈ Z*_{N}
-    if modulus <= 3:
-        raise ValueError("modulus 太小")
+    """加密安全：r ∈ [1, N//4]，且與modulus互質"""
+    max_r = max(2, modulus // 4)
     while True:
-        # 產生 2..modulus-2 的均勻亂數
-        x = 2 + randbelow(modulus - 3)
-        if gcd(x, modulus) == 1:
-            return x
+        r = randbelow(max_r - 1) + 1
+        if gcd(r, modulus) == 1:
+            return r
+
 
 def generate_strong_primes(bit_length: int):
     while True:
