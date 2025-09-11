@@ -66,7 +66,7 @@ def compute_tfidf_vectors(tf_vectors, pres_vectors, scale=100):
         for j in range(vocab_size):
             raw_count = tf_vectors[i][j]
             if raw_count > 0:
-                # 論文公式: TF_{i,j} = 1 + ln(N_{i,j})
+                # 計算 TF_{i,j} = 1 + ln(N_{i,j})
                 weighted_tf_val = 1 + math.log(raw_count)
                 print(f"  詞 {j}: 原始計數={raw_count}, 加權TF={weighted_tf_val:.4f}")
             else:
@@ -112,7 +112,7 @@ def demo():
     n_sys, g_sys, h_sys = sys_entity["pk"]
 
     # 2) 模擬資料
-    vocab, docs = generate_corpus(num_docs=5, vocab_size=2, avg_terms_per_doc=8, seed=42)
+    vocab, docs = generate_corpus(num_docs=5, vocab_size=5, avg_terms_per_doc=8, seed=42)
     print(f"[INFO] 產生的詞彙表: {vocab}")
     print(f"[INFO] 產生的文件: {docs}")
 
@@ -203,11 +203,21 @@ def demo():
     print("[INFO] Root node of encrypted index tree created")
 
     # 9) 搜尋測試
-    query_keywords = [vocab[0]] if len(vocab) > 0 else ["kw1"]  # 使用實際詞彙
+    query_keywords = [vocab[0]] if len(vocab) > 0 else ["kw1"]
+    print(f"\n[INFO] 查詢關鍵字: {query_keywords}")
     trapdoor = generate_trapdoor(paillier, vocab, query_keywords, h_sys)
-
-    top_docs = gbfs_search(paillier, root, trapdoor, top_k=5)
+    init_enc = paillier.encrypt(0, h_sys)  # 初始化為0的密文
+    top_docs = gbfs_search(paillier, root, trapdoor,init_enc, top_k=5)
     print("Top-k search results:", top_docs)
+
+    def plaintext_match(raw_vector, query_vector):
+        return sum(rv * qv for rv, qv in zip(raw_vector, query_vector))
+
+    # 用你的 tf_vectors 和 query_vector = [1,0,0,0,0]
+    scores = [plaintext_match(v, [1,0,0,0,0]) for v in tf_vectors]
+    print("明文匹配分数:", scores)
+    # 期望 [2,3,0,1,3]
+
 
 
 if __name__ == "__main__":

@@ -8,9 +8,7 @@ Cipher = Tuple[int, int]  # (C1, C2)
 
 class Paillier:
     """Paillier"""
-    def __init__(self, p:int,q:int,n:int, n2:int, g_core:int, lambda_dec:int, theta_ta:int, h_ta:int, mu:int):
-        self.p = p
-        self.q = q
+    def __init__(self,n:int, n2:int, g_core:int, lambda_dec:int, theta_ta:int, h_ta:int, mu:int):
         self.n = n
         self.n2 = n2
         self.g_core = g_core     # 子群生成元g
@@ -30,7 +28,7 @@ class Paillier:
         mu = pow(lu, -1, n)
         theta_ta = random.randint(1, n // 4)
         h_ta = pow(g_core, theta_ta, n2)
-        return cls(p=p,q=q,n=n, n2=n2, g_core=g_core, lambda_dec=lambda_dec, theta_ta=theta_ta, h_ta=h_ta, mu=mu)
+        return cls(n=n, n2=n2, g_core=g_core, lambda_dec=lambda_dec, theta_ta=theta_ta, h_ta=h_ta, mu=mu)
 
     def gen_entity_key(self, theta: int | None = None) -> Dict[str, Tuple[int, int, int]]:
         """產生一個實體的 (pk:(N, g_core, h), sk_weak:theta)"""
@@ -76,3 +74,7 @@ class Paillier:
         c1a, c2a = ca
         c1b, c2b = cb
         return ((c1a * c1b) % n2, (c2a * c2b) % n2)
+    def homomorphic_scalar_multiply(self, cipher: Cipher, k: int) -> Cipher:
+        c1, c2 = cipher
+        return (pow(c1, k, self.n2), pow(c2, k, self.n2))
+
