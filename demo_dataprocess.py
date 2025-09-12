@@ -1,106 +1,8 @@
 import json
 import math
 from package.Homo.paillier import Paillier
-from package.Dataprocess.dataprocessing import generate_corpus, compute_presence_vectors, build_index_tree
+from package.Dataprocess.dataprocessing import generate_corpus, compute_presence_vectors, build_index_tree,compute_raw_tf_vectors,compute_tfidf_vectors
 from package.Trapdoor.trapdoor import generate_trapdoor, gbfs_search
-
-def compute_raw_tf_vectors(vocab, docs):
-    """
-    計算原始詞頻計數向量（整數）
-    
-    Args:
-        vocab: 詞彙表
-        docs: 文件列表
-        
-    Returns:
-        tf_vectors: 包含整數計數的 TF 向量
-    """
-    tf_vectors = []
-    for doc in docs:
-        tf_vector = []
-        for word in vocab:
-            count = doc.count(word)  # 計算詞在文件中出現的次數
-            tf_vector.append(count)
-        tf_vectors.append(tf_vector)
-    return tf_vectors
-
-def compute_tfidf_vectors(tf_vectors, pres_vectors, scale=100):
-    """
-    根據論文 4.2.1 節計算 TF-IDF 向量
-    
-    Args:
-        tf_vectors: 原始詞頻計數向量 (整數計數)
-        pres_vectors: 出現向量 (presence vectors)
-        scale: 整數化縮放因子，預設為 100
-    
-    Returns:
-        tfidf_float: 浮點數 TF-IDF 向量（規範化後）
-        tfidf_int: 整數 TF-IDF 向量（規範化並縮放後）
-    """
-    num_docs = len(tf_vectors)
-    vocab_size = len(tf_vectors[0])
-    
-    print(f"[INFO] 計算 TF-IDF，文件數: {num_docs}, 詞彙大小: {vocab_size}")
-    print(f"[INFO] 原始 TF 向量: {tf_vectors}")
-    
-    # 1. 計算文件頻率 (DF - Document Frequency)
-    df = [0] * vocab_size
-    for j in range(vocab_size):
-        df[j] = sum(pres_vectors[i][j] for i in range(num_docs))
-    
-    # 2. 計算逆文件頻率 (IDF - Inverse Document Frequency)
-    idf = [math.log(num_docs / df[j]) if df[j] > 0 else 0 for j in range(vocab_size)]
-    
-    print(f"[INFO] 文件頻率 (DF): {df}")
-    print(f"[INFO] 逆文件頻率 (IDF): {[round(x, 4) for x in idf]}")
-    
-    # 3. 計算加權 TF 和 TF-IDF
-    tfidf_float = []
-    tfidf_int = []
-    
-    for i in range(num_docs):
-        print(f"\n[INFO] 處理文件 {i+1}:")
-        
-        # 3.1 計算對數加權的 TF: TF_{i,j} = 1 + ln(N_{i,j})
-        weighted_tf = []
-        for j in range(vocab_size):
-            raw_count = tf_vectors[i][j]
-            if raw_count > 0:
-                # 計算 TF_{i,j} = 1 + ln(N_{i,j})
-                weighted_tf_val = 1 + math.log(raw_count)
-                print(f"  詞 {j}: 原始計數={raw_count}, 加權TF={weighted_tf_val:.4f}")
-            else:
-                weighted_tf_val = 0
-                print(f"  詞 {j}: 原始計數={raw_count}, 加權TF={weighted_tf_val}")
-            weighted_tf.append(weighted_tf_val)
-        
-        # 3.2 計算 TF-IDF: TF-IDF_{i,j} = TF_{i,j} × IDF_j
-        tfidf_doc = [weighted_tf[j] * idf[j] for j in range(vocab_size)]
-        print(f"  TF-IDF (未規範化): {[round(x, 4) for x in tfidf_doc]}")
-        
-        # 3.3 向量規範化 (L2 normalization)
-        l2_norm = math.sqrt(sum(val**2 for val in tfidf_doc))
-        print(f"  L2 範數: {l2_norm:.4f}")
-        
-        if l2_norm > 0:
-            normalized_tfidf = [val / l2_norm for val in tfidf_doc]
-        else:
-            normalized_tfidf = tfidf_doc
-        
-        print(f"  規範化後 TF-IDF: {[round(x, 4) for x in normalized_tfidf]}")
-        
-        # 3.4 整數化處理 - 確保結果是正整數
-        tfidf_int_doc = []
-        for val in normalized_tfidf:
-            scaled_val = int(abs(val) * scale)  # 取絕對值確保為正數
-            tfidf_int_doc.append(scaled_val)
-        
-        print(f"  整數化 TF-IDF (×{scale}): {tfidf_int_doc}")
-        
-        tfidf_float.append(normalized_tfidf)
-        tfidf_int.append(tfidf_int_doc)
-    
-    return tfidf_float, tfidf_int
 
 def demo():
     # 1) 產生系統金鑰與 DO 公鑰
@@ -169,11 +71,10 @@ def demo():
     dec_tfidf = [[paillier.strong_decrypt(c1) % paillier.n for (c1, c2) in doc] for doc in enc_tfidf]
 
     # 比對原始
-    print("\n=== 解密驗證 ===")
-    print("原始 TF:", tf_vectors[0])
-    print("解密 TF:", dec_tf[0])
-    print("原始 Presence:", pres_vectors[0])
-    print("解密 Presence:", dec_pres[0])
+    # print("原始 TF:", tf_vectors[0])
+    # print("解密 TF:", dec_tf[0])
+    # print("原始 Presence:", pres_vectors[0])
+    # print("解密 Presence:", dec_pres[0])
     print("原始 TF-IDF (整數):", tfidf_int[0])
     print("解密 TF-IDF:", dec_tfidf[0])
     
@@ -203,20 +104,28 @@ def demo():
     print("[INFO] Root node of encrypted index tree created")
 
     # 9) 搜尋測試
-    query_keywords = [vocab[0]] if len(vocab) > 0 else ["kw1"]
+    vocab_list = ['kw1','kw2','kw3','kw4','kw5']
+    vocab = input("輸入要搜尋的 keywords (逗號分隔): ")
+    query_keywords = [kw.strip() for kw in vocab.split(",") if kw.strip()]
     print(f"\n[INFO] 查詢關鍵字: {query_keywords}")
-    trapdoor = generate_trapdoor(paillier, vocab, query_keywords, h_sys)
+    trapdoor = generate_trapdoor(paillier, vocab_list, query_keywords, h_sys)
     init_enc = paillier.encrypt(0, h_sys)  # 初始化為0的密文
     top_docs = gbfs_search(paillier, root, trapdoor,init_enc, top_k=5)
     print("Top-k search results:", top_docs)
 
-    def plaintext_match(raw_vector, query_vector):
-        return sum(rv * qv for rv, qv in zip(raw_vector, query_vector))
-
-    # 用你的 tf_vectors 和 query_vector = [1,0,0,0,0]
-    scores = [plaintext_match(v, [1,0,0,0,0]) for v in tf_vectors]
-    print("明文匹配分数:", scores)
-    # 期望 [2,3,0,1,3]
+    # def plaintext_match(raw_vector, query_vector):
+    #     return sum(rv * qv for rv, qv in zip(raw_vector, query_vector))
+    # vocab = input("輸入要搜尋的 keywords (逗號分隔): ")
+    # query_keywords = [kw.strip() for kw in vocab.split(",") if kw.strip()]
+    # query_vector = [1 if kw in query_keywords else 0 for kw in vocab_list]
+    # print("[INFO] 查詢向量:", query_vector)
+    # matches = []
+    # for doc_id, tfidf_vec in enumerate(tfidf_int, start=1):
+    #     score = plaintext_match(tfidf_vec, query_vector)
+    #     matches.append((doc_id, score))
+    # matches.sort(key=lambda x: x[1], reverse=True)
+    # top_k = matches[:5]
+    # print("Top-k search results:", top_k)
 
 
 
