@@ -1,153 +1,141 @@
-# main.py
-from package.Homo.paillier import Paillier
+import time
+import json
+from package.Homo.paillier import Paillier, Entity, FunctionNode
 from package.Homo.promise import PedersenVSS
-from package.Dataprocess.indextree import IndexTreeNode, build_index_tree
+from package.Dataprocess.dataprocessing import (
+    generate_corpus,
+    compute_presence_vectors,
+    compute_raw_tf_vectors,
+    compute_tfidf_vectors
+)
+from package.Trapdoor.trapdoor import generate_trapdoor, gbfs_search
+from package.Dataprocess.indextree import build_index_tree
 
+def print_stage(title: str):
+    print("\n" + "="*10 + f" {title} " + "="*10)
 
-def paillier_commit(t: int = 3, d: int = 5):
-    # 1) 產生 Paillier 系統鑰（含 λ 與 θ_TA）
-    """
-    1) 產生系統金鑰（對齊你的輸出格式）
-    2) 使用系統公鑰 h_TA 進行加密
-    3) 用 系統強私鑰(λ) 與 弱私鑰(theta_ta) 解密驗證
-    """
-    paillier = Paillier.keygen(k=256)
-    print("[*] System keys")
-    print("N bits ~= ", paillier.n.bit_length())
+def log(role: str, msg: str, duration: float = None):
+    if duration is None:
+        print(f"[{role}] {msg}")
+    else:
+        print(f"[{role}] {msg} 耗時: {duration:.4f} 秒")
 
-    ent = paillier.gen_entity_key()
-    n, g_core, h_i = ent["pk"]
-    theta_i = ent["sk_weak"]
+def setup_system(t: int, d: int, k: int):
+    timings = {}
+    start = time.time()
+    paillier = Paillier.keygen(k)
+    timings['keygen'] = time.time() - start
+    log("TA", f"產生系統金鑰，N長度 {k} bits", timings['keygen'])
 
-    m = 15005468827 % n
-    c1, c2 = paillier.encrypt(m, paillier.h_ta)
-    m_strong = paillier.strong_decrypt(c1)
-    m_weak = paillier.weak_decrypt(c1, c2, paillier.theta_ta)
-    print("[*] Encrypt/Decrypt demo")
-    print("m      =", m)
-    print("m_strong  =", m_strong, "系統(強私鑰)")
-    print("m_weak    =", m_weak,   "系統(弱私鑰)")
-    assert m_strong == m
-    assert m_weak   == m
-    print("[OK] 解密結果一致。")
-
-    """
-    依定義對系統強/弱私鑰做 Pedersen 承諾與 t-out-of-d 秘密分享：
-      E0_λ = α^λ β^v,  E0_θ = α^θ β^{v'}
-      shares: (i, λ_i, v_i), (i, θ_i, v'_i)
-    """
-    # 2) 產生 VSS 參數 (p, q, α, β) —— 同一組參數同時承諾/分享 λ 與 θ_TA
-    vss = PedersenVSS.keygen(min_q_bits=256)
-
-    # 3) 依群階 q 取值（Pedersen 承諾的秘密皆在 Z_q 上）
+    start = time.time()
+    vss = PedersenVSS.keygen(k)
     s_lambda = paillier.lambda_dec % vss.q
-    s_theta  = paillier.theta_ta  % vss.q
+    s_theta  = paillier.theta_ta   % vss.q
+    e0_l, es_l, shares_l = vss.init(s_lambda, t, d)
+    e0_t, es_t, shares_t = vss.init(s_theta,  t, d)
+    timings['vss'] = time.time() - start
+    log("TA", f"生成 Pedersen VSS 並分發 {d} 份秘密分享 (t={t})", timings['vss'])
 
-    # 4) 對 λ 與 θ_TA 各自建立承諾與 t-of-d 分享（f,g 多項式內部由 VSS 實作）
-    e0_lambda, es_lambda, shares_lambda = vss.init(s_lambda, t, d)  # E(λ, v)
-    e0_theta,  es_theta,  shares_theta  = vss.init(s_theta,  t, d)  # E(θ, v')
+    fns = {}
+    for i in range(1, d+1):
+        lam_i, _ = shares_l[i-1][1:]
+        the_i, _ = shares_t[i-1][1:]
+        fns[i] = FunctionNode(id=i, paillier=paillier,
+                              lambda_share=lam_i, theta_share=the_i)
+        log(f"FN{i}", "接收 λ, θ 分片")
 
-    # 5) 本地驗證每一份 share
-    for (i, si, vi) in shares_lambda:
-        assert vss.verify(i, si, vi, e0_lambda, es_lambda, t), f"[λ] Share {i} 驗證失敗"
-    for (i, si, vi) in shares_theta:
-        assert vss.verify(i, si, vi, e0_theta, es_theta, t),   f"[θ] Share {i} 驗證失敗"
+    timings['total'] = sum(timings.values())
+    log("TA", "setup_system 完成", timings['total'])
+    return paillier, vss, fns
 
-    # 6) 將 shares 依節點 i 配對（分配給節點 A_i）
-    by_id = {i: {} for i in range(1, d + 1)}
-    for (i, si, vi) in shares_lambda:
-        by_id[i]["lambda_i"] = si
-        by_id[i]["v_i"]      = vi
-    for (i, si, vi) in shares_theta:
-        by_id[i]["theta_i"]      = si
-        by_id[i]["v_i_prime"]    = vi
+def simulate_do_data_upload(do: Entity, paillier: Paillier):
+    timings = {}
+    start = time.time()
+    vocab, docs = generate_corpus(num_docs=5, vocab_size=5, avg_terms_per_doc=8, seed=42)
+    log(f"DO {do.id}", "產生 5 筆模擬文件，每筆 8 個關鍵字")
+    log(f"DO {do.id}", f"驗證文件內容: {docs}")
 
-    # 7) 抽 t 份重建自我檢查（模 q）
-    idxs = list(range(1, t + 1))
-    lam_rec = vss.recover([(i, by_id[i]["lambda_i"]) for i in idxs], t)
-    th_rec  = vss.recover([(i, by_id[i]["theta_i"])  for i in idxs], t)
+    tf = compute_raw_tf_vectors(vocab, docs)
+    pres = compute_presence_vectors(vocab, docs)
+    log(f"DO {do.id}", f"原始整數 TF 向量: {tf}")
+    tfidf_i = compute_tfidf_vectors(tf, pres)
+    log(f"DO {do.id}", "計算 TF/Presence/TF-IDF")
+    timings['vector'] = time.time() - start
 
-    print("\n[*] VSS 重建檢查")
-    print("原始 λ =", s_lambda, " | 重建 λ =", lam_rec)
-    print("原始 θ =", s_theta,  " | 重建 θ =", th_rec)
-    assert lam_rec == s_lambda, "λ 重建不相等"
-    assert th_rec  == s_theta,  "θ 重建不相等"
+    start = time.time()
+    n, g, h_do = do.pk
+    enc_tf = [[paillier.encrypt(v, h_do) for v in vec] for vec in tf]
+    enc_tfidf = [[paillier.encrypt(v, h_do) for v in vec] for vec in tfidf_i]
+    enc_pres = [[paillier.encrypt(v, paillier.h_ta) for v in vec] for vec in pres]
+    timings['encrypt'] = time.time() - start
+    log(f"DO {do.id}", "加密 TF/TF-IDF, 系統加密 Presence")
 
-    # 聚合不同節點的 shares
-    idxs = list(by_id.keys())[:t]
-    shares_lambda = [(i, by_id[i]['lambda_i']) for i in idxs]
-    shares_theta  = [(i, by_id[i]['theta_i'])  for i in idxs]
+    timings['total'] = timings['vector'] + timings['encrypt']
+    log(f"DO {do.id}", "simulate_do_data_upload 完成", timings['total'])
+    return vocab, enc_tf, enc_pres, enc_tfidf
 
-    # 重建秘密
-    lam_rec = vss.recover(shares_lambda, t)
-    th_rec  = vss.recover(shares_theta, t)
+def build_blockchain_data(do: Entity, paillier: Paillier,
+                          vocab, enc_tf, enc_pres, enc_tfidf):
+    start = time.time()
+    blocks = []
+    for i in range(len(enc_tf)):
+        blocks.append({
+            "doc_id": i+1,
+            "owner_id": do.id,
+            "vocab": vocab,
+            "enc_tf": enc_tf[i],
+            "enc_presence": enc_pres[i],
+            "enc_tfidf": enc_tfidf[i]
+        })
+    root = build_index_tree(paillier, blocks)
+    duration = time.time() - start
+    log("Blockchain", "建立索引樹", duration)
+    return root
 
+def simulate_du_query(do: Entity, paillier: Paillier,
+                      vocab, root, fns, t: int):
+    # 1) 讀取查詢關鍵字
+    start = time.time()
+    raw = input("輸入要搜尋的 keywords (逗號分隔): ")
+    query_keywords = [kw.strip() for kw in raw.split(",") if kw.strip()]
+    
+    # 2) 生成 Trapdoor（固定使用原始 vocab 列表）
+    n, g, h_du = do.pk
+    trapdoor = generate_trapdoor(paillier, vocab, query_keywords, h_du)
+    log(f"DU {du.id}", "生成 Trapdoor", time.time() - start)
 
-    assert lam_rec == s_lambda, "λ重建不符"
-    assert th_rec  == s_theta, "θ重建不符"
-    print(f"[Test] 節點協作重建密鑰成功 (t={t})")
+    # 3) 閾值解密
+    start = time.time()
+    participants = list(fns.values())[:t]
+    partials = []
+    for fn in participants:
+        pv = [fn.partial_decrypt(ct) for ct in trapdoor]
+        partials.append((fn.id, pv))
+    simplified = FunctionNode.combine_trapdoor(partials, paillier.n2)
+    log(f"DU {du.id}", "閾值解密 Trapdoor", time.time() - start)
 
-    # 8) 輸出摘要
-    print("\n[*] Pedersen 承諾（系統強/弱私鑰）")
-    print("E0_lambda =", e0_lambda)
-    print("E0_theta  =", e0_theta)
-    print("[*] 係數承諾 Es_lambda  =", len(es_lambda), ", Es_theta 長度 =", len(es_theta))
-    print(f"[*] 已建立 {d} 份 shares，門檻 t = {t}")
-    for i in range(1, d + 1):
-        rec = by_id[i]
-        print(f" A_{i}: (λ_i={rec['lambda_i']} || (θ_i={rec['theta_i']}")
+    # 4) 同態搜尋
+    start = time.time()
+    init_enc = paillier.encrypt(0, paillier.h_ta)
+    results = gbfs_search(paillier, root, simplified, init_enc, top_k=5)
+    log(f"DU {du.id}", "執行搜尋", time.time() - start)
 
-    return {
-        "paillier": paillier,
-        "vss": vss,
-        "E0_lambda": e0_lambda, "Es_lambda": es_lambda, "shares_lambda": shares_lambda,
-        "E0_theta":  e0_theta,  "Es_theta":  es_theta,  "shares_theta":  shares_theta,
-        "node_shares": by_id
-    }
-
-def index_tree_demo():
-    # 1. 系統初始化（Paillier 公私鑰）
-    paillier = Paillier.keygen(k=64)
-    ent = paillier.gen_entity_key()
-    n, g_core, h_i = ent["pk"]
-
-    # 2. 模擬文件索引向量 (明文) —— 每個文件用長度=3 的向量表示
-    doc_vectors = [
-        [1, 0, 2],  # 文件1
-        [0, 1, 1],  # 文件2
-        [1, 1, 0],  # 文件3
-        [2, 0, 1],  # 文件4
-    ]
-
-    # 3. 加密向量
-    leaf_nodes = []
-    for doc_id, vec in enumerate(doc_vectors, start=1):
-        enc_vec = [paillier.encrypt(val, h=h_i) for val in vec]
-        leaf = IndexTreeNode(
-            node_id=f"doc-{doc_id}",
-            index_vector=enc_vec,
-            fid=doc_id
-        )
-        leaf_nodes.append(leaf)
-
-    # 4. 建立 index tree
-    root = build_index_tree(leaf_nodes, paillier.n2)
-
-    # 5. 輸出樹結構
-    def print_tree(node, depth=0):
-        indent = "  " * depth
-        if node.fid:
-            print(f"{indent}- Leaf Node {node.id}, fid={node.fid}")
-        else:
-            print(f"{indent}- Internal Node {node.id}")
-        if node.Pl:
-            print_tree(node.Pl, depth + 1)
-        if node.Pr:
-            print_tree(node.Pr, depth + 1)
-
-    print("[*] Index Tree 結構:")
-    print_tree(root)
+    return results
 
 if __name__ == "__main__":
-    index_tree_demo()
-    paillier_commit(t=3, d=5)
+    print_stage("系統啟動")
+    paillier, vss, fns = setup_system(t=3, d=5, k=64)
+
+    print_stage("註冊 Data Owner 並上傳資料")
+    do = Entity.register_data_owner(paillier, "Alice")
+    vocab, enc_tf, enc_pres, enc_tfidf = simulate_do_data_upload(do, paillier)
+
+    print_stage("上傳區塊鏈，建立 Index Tree")
+    root = build_blockchain_data(do, paillier, vocab, enc_tf, enc_pres, enc_tfidf)
+
+    print_stage("註冊 Data User 並查詢")
+    du = Entity.register_data_user(paillier, "Bob")
+    results = simulate_du_query(du, paillier, vocab, root, fns, t=3)
+
+    print_stage("搜尋結果")
+    print(f"Top-5 文件 (ID, 匹配度)：{results}")

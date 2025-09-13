@@ -1,13 +1,11 @@
 # package/Homo/dataprocessing.py
 import random
 import math
-from collections import Counter
 from typing import List, Tuple
 
-# ---- 產生資料 ----
-def generate_corpus(num_docs: int = 5,
-                    vocab_size: int = 20,
-                    avg_terms_per_doc: int = 6,
+def generate_corpus(num_docs: int,
+                    vocab_size: int,
+                    avg_terms_per_doc: int,
                     seed: int | None = None) -> Tuple[List[str], List[List[str]]]:
     """
     模擬：
@@ -60,7 +58,6 @@ def compute_raw_tf_vectors(vocab, docs):
 def compute_tfidf_vectors(tf_vectors, pres_vectors, scale=100):
     """
     根據論文 4.2.1 節計算 TF-IDF 向量
-    
     Args:
         tf_vectors: 原始詞頻計數向量 (整數計數)
         pres_vectors: 出現向量 (presence vectors)
@@ -73,8 +70,6 @@ def compute_tfidf_vectors(tf_vectors, pres_vectors, scale=100):
     num_docs = len(tf_vectors)
     vocab_size = len(tf_vectors[0])
     
-    print(f"[INFO] 計算 TF-IDF，文件數: {num_docs}, 詞彙大小: {vocab_size}")
-    
     # 1. 計算文件頻率 (DF - Document Frequency)
     df = [0] * vocab_size
     for j in range(vocab_size):
@@ -83,11 +78,8 @@ def compute_tfidf_vectors(tf_vectors, pres_vectors, scale=100):
     # 2. 計算逆文件頻率 (IDF - Inverse Document Frequency)
     idf = [math.log(num_docs / df[j]) if df[j] > 0 else 0 for j in range(vocab_size)]
     
-    print(f"[INFO] 文件頻率 (DF): {df}")
-    print(f"[INFO] 逆文件頻率 (IDF): {[round(x, 4) for x in idf]}")
-    
     # 3. 計算加權 TF 和 TF-IDF
-    tfidf_float = []
+    #tfidf_float = []
     tfidf_int = []
     
     for i in range(num_docs):
@@ -129,50 +121,7 @@ def compute_tfidf_vectors(tf_vectors, pres_vectors, scale=100):
         
         #print(f"  整數化 TF-IDF (×{scale}): {tfidf_int_doc}")
         
-        tfidf_float.append(normalized_tfidf)
+        #tfidf_float.append(normalized_tfidf)
         tfidf_int.append(tfidf_int_doc)
     
-    return tfidf_float, tfidf_int
-
-# ---- 加密索引樹節點 ----
-class LeafNode:
-    def __init__(self, doc_id, enc_vector):
-        self.doc_id = doc_id
-        self.enc_vector = enc_vector  # list of ciphertext tuples [(c1,c2), ...]
-        self.next_leaf = None
-
-class InternalNode:
-    def __init__(self, children=None):
-        self.children = children or []
-        self.enc_vector = None  # 合併子節點向量
-
-def homomorphic_sum(paillier, enc_vectors: list):
-    """同態加法合併多個向量"""
-    if not enc_vectors:
-        return []
-    summed = enc_vectors[0]
-    for vec in enc_vectors[1:]:
-        new_sum = [
-            paillier.homomorphic_add(c1_tuple, c2_tuple, paillier.n2)
-            for c1_tuple, c2_tuple in zip(summed, vec)
-        ]
-        summed = new_sum
-    return summed
-
-
-def build_index_tree(paillier, doc_blocks):
-    # 建立葉節點
-    leaves = [LeafNode(doc["doc_id"], doc["enc_tf"]) for doc in doc_blocks]
-
-    current_level = leaves
-    while len(current_level) > 1:
-        next_level = []
-        for i in range(0, len(current_level), 2):
-            children = current_level[i:i+2]
-            enc_vec = homomorphic_sum(paillier, [c.enc_vector for c in children])
-            node = InternalNode(children)
-            node.enc_vector = enc_vec
-            next_level.append(node)
-        current_level = next_level
-    root = current_level[0]
-    return root
+    return tfidf_int

@@ -1,7 +1,7 @@
 # paillier.py
 import random
 from math import lcm
-from typing import Dict, Tuple
+from typing import Dict, Tuple,List
 from package.Homo.utils import modinv,L, rand_coprime, generate_strong_primes, find_g
 
 Cipher = Tuple[int, int]  # (C1, C2)
@@ -29,13 +29,6 @@ class Paillier:
         theta_ta = random.randint(1, n // 4)
         h_ta = pow(g_core, theta_ta, n2)
         return cls(n=n, n2=n2, g_core=g_core, lambda_dec=lambda_dec, theta_ta=theta_ta, h_ta=h_ta, mu=mu)
-
-    def gen_entity_key(self, theta: int | None = None) -> Dict[str, Tuple[int, int, int]]:
-        """產生一個實體的 (pk:(N, g_core, h), sk_weak:theta)"""
-        if theta is None:
-            theta = random.randint(1, self.n // 4)
-        h = pow(self.g_core, theta, self.n2)
-        return {"pk": (self.n, self.g_core, h), "sk_weak": theta}
 
     def encrypt(self, m: int, h: int, r: int | None = None) -> Cipher:
         """加密：只需 m 與該實體的 h """
@@ -78,3 +71,104 @@ class Paillier:
         c1, c2 = cipher
         return (pow(c1, k, self.n2), pow(c2, k, self.n2))
 
+class FunctionNode:
+    """FN node"""
+    def __init__(self, id: int, paillier: Paillier, lambda_share: int, theta_share: int):
+        self.id = id
+        self.paillier = paillier
+        self.lambda_share = lambda_share  # λ_i
+        self.theta_share = theta_share    # θ_i
+    
+    def partial_decrypt(self, cipher_pair: Tuple[int,int]) -> Tuple[int,int]:
+        """部分解密：(c1^λ, c2^λ) mod n²"""
+        c1, c2 = cipher_pair
+        return (
+            pow(c1, self.lambda_share, self.paillier.n2),
+            pow(c2, self.lambda_share, self.paillier.n2)
+        )
+
+    @staticmethod
+    def combine_trapdoor(
+        partials: List[Tuple[int, List[Tuple[int,int]]]],
+        n2: int
+    ) -> List[Tuple[int,int]]:
+        """
+        合併多個節點的部分解密結果，重建完整 Trapdoor 密文向量：
+        partials: [(node_id, [(c1^λᵢ, c2^λᵢ), ...]), ...]
+        返回 [(c1^θ_TA, c2^θ_TA), ...]
+        """
+        ids = [pid for pid, _ in partials]
+        # 拉格朗日插值係數計算（模 n）
+        def lagrange_coeff(j):
+            num, den = 1, 1
+            for m in ids:
+                if m != j:
+                    num = (num * (-m)) % n2
+                    den = (den * (j - m)) % n2
+            return num * pow(den, -1, n2) % n2
+
+        # 將部分解密按 node id 組成 dict
+        part_dict = {pid: vec for pid, vec in partials}
+        length = len(next(iter(part_dict.values())))
+        result = []
+        for idx in range(length):
+            acc1, acc2 = 1, 1
+            for j, vec in part_dict.items():
+                lj = lagrange_coeff(j)
+                c1j, c2j = vec[idx]
+                # 同態：(c1j ^ lj) 累乘
+                acc1 = (acc1 * pow(c1j, lj, n2)) % n2
+                acc2 = (acc2 * pow(c2j, lj, n2)) % n2
+            result.append((acc1, acc2))
+        return result
+
+
+class Entity:
+    """Data Owner/User """
+    def __init__(self, id: int, pk: Tuple[int, int, int], sk_weak: int):
+        self.id = id
+        self.pk = pk  # (N, g_core, h)
+        self.sk_weak = sk_weak  # theta_i
+        #self.ciphertexts: Dict[str, Cipher] = {}  # 儲存加密的資料
+
+    @staticmethod
+    def gen_entity_key(n: int, g_core: int, n2: int, theta: int | None = None
+                      ) -> Dict[str, Tuple[int, int, int]]:
+        """產生一個實體的 (pk:(N, g_core, h), sk_weak:theta)"""
+        if theta is None:
+            theta = random.randint(1, n // 4)
+        
+        # 重要：計算 h = g^theta mod n^2
+        h = pow(g_core, theta, n2)
+        
+        return {"pk": (n, g_core, h), "sk_weak": theta}
+    
+    @classmethod
+    def register_data_owner(cls, paillier, entity_id: str = None):
+        """TA 註冊一個資料擁有者（DO）"""
+        if entity_id is None:
+            entity_id = f"DO_{random.randint(1, 999):03d}"
+        
+        print(f"[*] TA 正在註冊 Data Owner: {entity_id}")
+        
+        do_keys = cls.gen_entity_key(paillier.n, paillier.g_core, paillier.n2)
+        do = cls(id=entity_id, pk=do_keys["pk"], sk_weak=do_keys["sk_weak"])
+        
+        print(f"     ✓ DO 註冊成功，金鑰已建立")
+        
+        return do
+
+    @classmethod
+    def register_data_user(cls, paillier, entity_id: str = None):
+        """TA 註冊一個資料使用者（DU）"""
+        if entity_id is None:
+            entity_id = f"DU_{random.randint(1, 999):03d}"
+            
+        print(f"[*] TA 正在註冊 Data User: {entity_id}")
+        
+        du_keys = cls.gen_entity_key(paillier.n, paillier.g_core, paillier.n2)
+        du = cls(id=entity_id, pk=du_keys["pk"], sk_weak=du_keys["sk_weak"])
+        
+        print(f"  ✓ DU 註冊成功，金鑰已建立")
+        
+        return du

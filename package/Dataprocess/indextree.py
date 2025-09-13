@@ -1,39 +1,42 @@
-import uuid
-from package.Homo.paillier import Paillier
+# ---- 加密索引樹節點 ----
+class LeafNode:
+    def __init__(self, doc_id, enc_vector):
+        self.doc_id = doc_id
+        self.enc_vector = enc_vector  # list of ciphertext tuples [(c1,c2), ...]
+        self.next_leaf = None
 
-def gen_id() -> str:
-    return str(uuid.uuid4())[:8]
+class InternalNode:
+    def __init__(self, children=None):
+        self.children = children or []
+        self.enc_vector = None  # 合併子節點向量
 
-class IndexTreeNode:
-    """實作 index tree"""
-    def __init__(self, node_id, index_vector, left=None, right=None, fid=None):
-        self.id = node_id
-        self.P = index_vector    # 加密向量 (list of ciphertext tuples)
-        self.Pl = left           # 左子節點
-        self.Pr = right          # 右子節點
-        self.fid = fid           # 葉節點才有
+def homomorphic_sum(paillier, enc_vectors: list):
+    """同態加法合併多個向量 => 放入Paillier?"""
+    if not enc_vectors:
+        return []
+    summed = enc_vectors[0]
+    for vec in enc_vectors[1:]:
+        new_sum = [
+            paillier.homomorphic_add(c1_tuple, c2_tuple, paillier.n2)
+            for c1_tuple, c2_tuple in zip(summed, vec)
+        ]
+        summed = new_sum
+    return summed
 
-def build_index_tree(leaf_nodes, n2):
-    nodes = leaf_nodes.copy()
-    while len(nodes) > 1:
-        new_nodes = []
-        for i in range(0, len(nodes), 2):
-            left = nodes[i]
-            right = nodes[i+1] if i+1 < len(nodes) else None
-            if right:
-                parent_vector = [
-                    Paillier.homomorphic_add(left.P[j], right.P[j], n2)
-                    for j in range(len(left.P))
-                ]
-                parent = IndexTreeNode(
-                    node_id=gen_id(),
-                    index_vector=parent_vector,
-                    left=left,
-                    right=right,
-                    fid=None
-                )
-                new_nodes.append(parent)
-            else:
-                new_nodes.append(left)
-        nodes = new_nodes
-    return nodes[0]  # 回傳樹根
+
+def build_index_tree(paillier, doc_blocks):
+    # 建立葉節點
+    leaves = [LeafNode(doc["doc_id"], doc["enc_tf"]) for doc in doc_blocks]
+
+    current_level = leaves
+    while len(current_level) > 1:
+        next_level = []
+        for i in range(0, len(current_level), 2):
+            children = current_level[i:i+2]
+            enc_vec = homomorphic_sum(paillier, [c.enc_vector for c in children])
+            node = InternalNode(children)
+            node.enc_vector = enc_vec
+            next_level.append(node)
+        current_level = next_level
+    root = current_level[0]
+    return root

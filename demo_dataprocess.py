@@ -1,14 +1,15 @@
 import json
 import math
-from package.Homo.paillier import Paillier
-from package.Dataprocess.dataprocessing import generate_corpus, compute_presence_vectors, build_index_tree,compute_raw_tf_vectors,compute_tfidf_vectors
+from package.Homo.paillier import Paillier,Entity
+from package.Dataprocess.dataprocessing import generate_corpus, compute_presence_vectors, compute_raw_tf_vectors,compute_tfidf_vectors
 from package.Trapdoor.trapdoor import generate_trapdoor, gbfs_search
+from package.Dataprocess.indextree import build_index_tree
 
 def demo():
     # 1) 產生系統金鑰與 DO 公鑰
     paillier = Paillier.keygen(k=64)
-    do_entity = paillier.gen_entity_key()
-    sys_entity = paillier.gen_entity_key()  # 系統公鑰 pk_TA
+    do_entity = Entity.gen_entity_key(paillier.n,paillier.g_core,paillier.n2)
+    sys_entity = Entity.gen_entity_key(paillier.n,paillier.g_core,paillier.n2)  # 系統公鑰 pk_TA
 
     n_do, g_do, h_do = do_entity["pk"]
     n_sys, g_sys, h_sys = sys_entity["pk"]
@@ -26,7 +27,7 @@ def demo():
     print(f"[INFO] 出現向量: {pres_vectors}")
     
     # 使用修正後的 TF-IDF 計算
-    tfidf_float, tfidf_int = compute_tfidf_vectors(tf_vectors, pres_vectors)
+    tfidf_int = compute_tfidf_vectors(tf_vectors, pres_vectors)
 
     # 4) 加密 - 修正加密呼叫
     print(f"\n[INFO] 開始加密...")

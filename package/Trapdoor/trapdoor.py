@@ -3,8 +3,6 @@
 from typing import List
 import heapq
 
-# paillier 是你的 Paillier 實例，必須支援 encrypt() 與 homomorphic_add()
-
 def generate_trapdoor(paillier, vocab_list, query_keywords, h_sys):
     """生成加密的查詢陷門向量"""
     # 建立查詢向量 (與明文版本相同邏輯)
