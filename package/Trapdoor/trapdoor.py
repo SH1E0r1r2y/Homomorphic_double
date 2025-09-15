@@ -44,14 +44,18 @@ def gbfs_search(paillier, root, trapdoor, init_enc, top_k=3):
     results = []
     while heap and len(results) < top_k:
         score, _, node = heapq.heappop(heap)
-        if hasattr(node, "doc_id"):
-            results.append((node.doc_id, -score))
+        if hasattr(node, "block"):
+            # 从 node.block 里直接拿 doc_id 和 CID
+            doc_id = node.block["doc_id"]
+            cid = node.block["CID"]
+            results.append((doc_id, cid, -score))
         else:
             for child in node.children:
                 child_score = encrypted_vector_match(
                     paillier, child.enc_vector, trapdoor, init_enc
                 )
                 heapq.heappush(heap, (-child_score, next(counter), child))
-    return results
+    return results  # List of (doc_id, cid, score)
+
 
 

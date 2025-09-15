@@ -3,10 +3,11 @@ import json
 from package.Homo.paillier import Paillier, Entity, FunctionNode
 from package.Homo.promise import PedersenVSS
 from package.Dataprocess.dataprocessing import (
-generate_corpus,compute_presence_vectors,compute_raw_tf_vectors,compute_tfidf_vectors
+compute_local_cid,generate_corpus,compute_presence_vectors,compute_raw_tf_vectors,compute_tfidf_vectors
 )
 from package.Trapdoor.trapdoor import generate_trapdoor, gbfs_search
 from package.Dataprocess.indextree import build_index_tree
+
 def print_stage(title: str):
     print("\n" + "="*10 + f" {title} " + "="*10)
 def log(role: str, msg: str, duration: float = None):
@@ -14,6 +15,7 @@ def log(role: str, msg: str, duration: float = None):
         print(f"[{role}] {msg}")
     else:
         print(f"[{role}] {msg} 耗時: {duration:.4f} 秒")
+
 def setup_system(t: int, d: int, k: int):
     timings = {}
     start = time.time()
@@ -43,6 +45,11 @@ def simulate_do_data_upload(do: Entity, paillier: Paillier):
     vocab, docs = generate_corpus(num_docs=5, vocab_size=5, avg_terms_per_doc=15, seed=42)
     log(f"DO {do.id}", "產生 5 筆模擬文件，每筆 15 個關鍵字")
     log(f"DO {do.id}", f"驗證文件內容: {docs}")
+    cid_map = {}
+    for i, tokens in enumerate(docs, start=1):
+        block = {"doc_id": i, "tokens": tokens}
+        data = json.dumps(block).encode("utf-8")
+        cid_map[i] = compute_local_cid(data)
     tf = compute_raw_tf_vectors(vocab, docs)
     pres = compute_presence_vectors(vocab, docs)
     log(f"DO {do.id}", f"原始整數 TF 向量: {tf}")
@@ -58,12 +65,14 @@ def simulate_do_data_upload(do: Entity, paillier: Paillier):
     log(f"DO {do.id}", "加密 TF/TF-IDF, 系統加密 Presence")
     timings['total'] = timings['vector'] + timings['encrypt']
     log(f"DO {do.id}", "simulate_do_data_upload 完成", timings['total'])
-    return vocab, enc_tf, enc_pres, enc_tfidf
-def build_blockchain_data(do: Entity, paillier: Paillier, vocab, enc_tf, enc_pres, enc_tfidf):
+    return vocab, enc_tf, enc_pres, enc_tfidf, cid_map
+
+def build_blockchain_data(do: Entity, paillier: Paillier, cid_map,vocab, enc_tf, enc_pres, enc_tfidf):
     start = time.time()
     blocks = []
     for i in range(len(enc_tf)):
         blocks.append({
+            "CID": cid_map[i+1],
             "doc_id": i+1,
             "owner_id": do.id,
             "vocab": vocab,
@@ -79,7 +88,6 @@ def simulate_du_query(du: Entity, paillier: Paillier,vocab, root, fns, t: int):
     start = time.time()
     raw = input("[DU Bob] 輸入要搜尋的 keywords (逗號分隔): ")
     query_keywords = [kw.strip() for kw in raw.split(",") if kw.strip()]
-
     n, g, h_du = du.pk
     sk_du = du.sk_weak
     trapdoor = generate_trapdoor(paillier, vocab, query_keywords, h_du)
@@ -99,12 +107,12 @@ def simulate_du_query(du: Entity, paillier: Paillier,vocab, root, fns, t: int):
     return results
 if __name__ == "__main__":
     print_stage("系統啟動")
-    paillier, vss, fns = setup_system(t=3, d=5, k=64)
+    paillier, vss, fns = setup_system(t=3, d=5, k=128)
     print_stage("註冊 Data Owner 並上傳資料")
     do = Entity.register_data_owner(paillier, "Alice")
-    vocab, enc_tf, enc_pres, enc_tfidf = simulate_do_data_upload(do, paillier)
+    vocab, enc_tf, enc_pres, enc_tfidf, cid_map = simulate_do_data_upload(do, paillier)
     print_stage("上傳區塊鏈，建立 Index Tree")
-    root = build_blockchain_data(do, paillier, vocab, enc_tf, enc_pres, enc_tfidf)
+    root = build_blockchain_data(do, paillier, cid_map, vocab, enc_tf, enc_pres, enc_tfidf)
     print_stage("註冊 Data User 並查詢")
     du = Entity.register_data_user(paillier, "Bob")
     results = simulate_du_query(du, paillier, vocab, root, fns, t=3)

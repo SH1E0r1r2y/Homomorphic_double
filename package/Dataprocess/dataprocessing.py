@@ -1,7 +1,18 @@
 # package/Homo/dataprocessing.py
 import random
 import math
+from cid import make_cid
+import multihash
+import hashlib
 from typing import List, Tuple
+
+def compute_local_cid(data: bytes) -> str:
+    hash_digest = hashlib.sha256(data).digest()
+    mh = multihash.digest(data, "sha2-256")
+    mh_bytes = mh.encode()
+    # 4) 建立 CID （CIDv1 + dag-pb codec）
+    cid_obj = make_cid(1, "dag-pb", mh_bytes)
+    return str(cid_obj)
 
 def generate_corpus(num_docs: int,
                     vocab_size: int,
@@ -61,7 +72,7 @@ def compute_tfidf_vectors(tf_vectors, pres_vectors, scale=100):
     Args:
         tf_vectors: 原始詞頻計數向量 (整數計數)
         pres_vectors: 出現向量 (presence vectors)
-        scale: 整數化縮放因子，預設為 100
+        scale: 整數化縮放因子，設為 100
     
     Returns:
         tfidf_float: 浮點數 TF-IDF 向量（規範化後）
@@ -70,21 +81,16 @@ def compute_tfidf_vectors(tf_vectors, pres_vectors, scale=100):
     num_docs = len(tf_vectors)
     vocab_size = len(tf_vectors[0])
     
-    # 1. 計算文件頻率 (DF - Document Frequency)
     df = [0] * vocab_size
     for j in range(vocab_size):
         df[j] = sum(pres_vectors[i][j] for i in range(num_docs))
     
-    # 2. 計算逆文件頻率 (IDF - Inverse Document Frequency)
     idf = [math.log(num_docs / df[j]) if df[j] > 0 else 0 for j in range(vocab_size)]
     
-    # 3. 計算加權 TF 和 TF-IDF
     #tfidf_float = []
     tfidf_int = []
     
     for i in range(num_docs):
-        #print(f"\n[INFO] 處理文件 {i+1}:")
-        
         # 3.1 計算對數加權的 TF: TF_{i,j} = 1 + ln(N_{i,j})
         weighted_tf = []
         for j in range(vocab_size):
