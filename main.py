@@ -42,8 +42,8 @@ def setup_system(t: int, d: int, k: int):
 def simulate_do_data_upload(do: Entity, paillier: Paillier):
     timings = {}
     start = time.time()
-    vocab, docs = generate_corpus(num_docs=5, vocab_size=5, avg_terms_per_doc=15, seed=42)
-    log(f"DO {do.id}", "產生 5 筆模擬文件，每筆 15 個關鍵字")
+    vocab, docs = generate_corpus(num_docs=7, vocab_size=5, avg_terms_per_doc=15, seed=42)
+    log(f"DO {do.id}", "產生 7 筆模擬文件，每筆 15 個關鍵字")
     log(f"DO {do.id}", f"驗證文件內容: {docs}")
     cid_map = {}
     for i, tokens in enumerate(docs, start=1):
@@ -51,23 +51,23 @@ def simulate_do_data_upload(do: Entity, paillier: Paillier):
         data = json.dumps(block).encode("utf-8")
         cid_map[i] = compute_local_cid(data)
     tf = compute_raw_tf_vectors(vocab, docs)
-    pres = compute_presence_vectors(vocab, docs)
     log(f"DO {do.id}", f"原始整數 TF 向量: {tf}")
-    tfidf_i = compute_tfidf_vectors(tf, pres)
-    log(f"DO {do.id}", "計算 TF/Presence/TF-IDF")
+    pres = compute_presence_vectors(vocab, docs)
+    #tfidf_i = compute_tfidf_vectors(tf, pres)
+    log(f"DO {do.id}", "計算 TF/Presence")
     timings['vector'] = time.time() - start
     start = time.time()
     n, g, h_do = do.pk
     enc_tf = [[paillier.encrypt(v, h_do) for v in vec] for vec in tf]
-    enc_tfidf = [[paillier.encrypt(v, h_do) for v in vec] for vec in tfidf_i]
+    #enc_tfidf = [[paillier.encrypt(v, h_do) for v in vec] for vec in tfidf_i]
     enc_pres = [[paillier.encrypt(v, paillier.h_ta) for v in vec] for vec in pres]
     timings['encrypt'] = time.time() - start
-    log(f"DO {do.id}", "加密 TF/TF-IDF, 系統加密 Presence")
+    log(f"DO {do.id}", "加密 TF, 系統加密 Presence")
     timings['total'] = timings['vector'] + timings['encrypt']
     log(f"DO {do.id}", "simulate_do_data_upload 完成", timings['total'])
-    return vocab, enc_tf, enc_pres, enc_tfidf, cid_map
+    return vocab, enc_tf, enc_pres, cid_map
 
-def build_blockchain_data(do: Entity, paillier: Paillier, cid_map,vocab, enc_tf, enc_pres, enc_tfidf):
+def build_blockchain_data(do: Entity, paillier: Paillier, cid_map,vocab, enc_tf, enc_pres):
     start = time.time()
     blocks = []
     for i in range(len(enc_tf)):
@@ -78,7 +78,7 @@ def build_blockchain_data(do: Entity, paillier: Paillier, cid_map,vocab, enc_tf,
             "vocab": vocab,
             "enc_tf": enc_tf[i],
             "enc_presence": enc_pres[i],
-            "enc_tfidf": enc_tfidf[i]
+            #"enc_tfidf": enc_tfidf[i]
         })
     root = build_index_tree(paillier, blocks)
     duration = time.time() - start
@@ -107,12 +107,12 @@ def simulate_du_query(du: Entity, paillier: Paillier,vocab, root, fns, t: int):
     return results
 if __name__ == "__main__":
     print_stage("系統啟動")
-    paillier, vss, fns = setup_system(t=3, d=5, k=128)
+    paillier, vss, fns = setup_system(t=3, d=5, k=64)
     print_stage("註冊 Data Owner 並上傳資料")
     do = Entity.register_data_owner(paillier, "Alice")
-    vocab, enc_tf, enc_pres, enc_tfidf, cid_map = simulate_do_data_upload(do, paillier)
+    vocab, enc_tf, enc_pres, cid_map = simulate_do_data_upload(do, paillier)
     print_stage("上傳區塊鏈，建立 Index Tree")
-    root = build_blockchain_data(do, paillier, cid_map, vocab, enc_tf, enc_pres, enc_tfidf)
+    root = build_blockchain_data(do, paillier, cid_map, vocab, enc_tf, enc_pres)
     print_stage("註冊 Data User 並查詢")
     du = Entity.register_data_user(paillier, "Bob")
     results = simulate_du_query(du, paillier, vocab, root, fns, t=3)

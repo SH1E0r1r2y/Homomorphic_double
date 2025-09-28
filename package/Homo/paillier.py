@@ -19,7 +19,7 @@ class Paillier:
     @classmethod
     def keygen(cls, k: int = 64) -> "Paillier":
         p, q = generate_strong_primes(k)
-        lambda_dec  = lcm(p - 1, q - 1)       # ← λ
+        lambda_dec  = lcm(p - 1, q - 1)//2
         g_core, n, n2 = find_g(p, q, lambda_dec)
         # μ = (L(g^λ mod N^2))^{-1} mod N
         lu = L(pow((n + 1) % n2, lambda_dec, n2), n)
@@ -116,7 +116,6 @@ class Entity:
         self.id = id
         self.pk = pk  # (N, g_core, h)
         self.sk_weak = sk_weak  # theta_i
-        #self.ciphertexts: Dict[str, Cipher] = {}  # 儲存加密的資料
 
     @staticmethod
     def gen_entity_key(n: int, g_core: int, n2: int, theta: int | None = None
@@ -124,7 +123,6 @@ class Entity:
         if theta is None:
             theta = random.randint(1, n // 4)
         
-        # 重要：計算 h = g^theta mod n^2
         h = pow(g_core, theta, n2)
         
         return {"pk": (n, g_core, h), "sk_weak": theta}
