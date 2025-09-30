@@ -26,7 +26,7 @@ def homomorphic_sum(paillier, enc_vectors: list):
 
 def build_index_tree(paillier, doc_blocks):
     # 建立葉節點
-    leaves = [LeafNode(doc, doc["enc_tf"]) for doc in doc_blocks]
+    leaves = [LeafNode(doc, doc["enc_presence"]) for doc in doc_blocks]
 
     current_level = leaves
     while len(current_level) > 1:

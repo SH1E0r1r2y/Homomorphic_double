@@ -30,7 +30,7 @@ def find_g(p: int, q: int, lambda_dec: int):
     n2 = N * N
     p_ = (p - 1) // 2
     q_ = (q - 1) // 2
-    lam_g = lambda_dec // 2  # g 的階 = lcm(p', q')
+    lam_g = lambda_dec //2  # g 的階 = lcm(p', q')
     target = 2 * p_ * q_
 
     while True: # 直到挑到適合的 g

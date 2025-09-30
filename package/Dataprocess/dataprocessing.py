@@ -46,14 +46,12 @@ def compute_presence_vectors(vocab, docs):
         pres_vectors.append(vec)
     return pres_vectors
 
-def compute_raw_tf_vectors(vocab, docs):
+def compute_raw_tf(vocab, docs):
     """
-    計算原始詞頻計數向量（整數）
-    
+    計算原始詞頻計數向量
     Args:
         vocab: 詞彙表
         docs: 文件列表
-        
     Returns:
         tf_vectors: 包含整數計數的 TF 向量
     """
@@ -65,6 +63,57 @@ def compute_raw_tf_vectors(vocab, docs):
             tf_vector.append(count)
         tf_vectors.append(tf_vector)
     return tf_vectors
+
+def compute_raw_tf_vectors(vocab: List[str], docs: List[List[str]], scale: int = 100) -> Tuple[List[List[int]], List[List[float]]]:
+    """
+    計算並回傳縮放後的整數 TF 向量 (符合論文公式)。
+
+    TF_{i,wj} = (1 + ln Nfi,wj) / (1 + ln ||fi||)
+    最後再乘上 δo (scale)，並四捨五入成整數。
+
+    Args:
+        vocab: 詞彙表 (list of str)
+        docs: 文件列表，每個文件是字詞 list
+        scale: 縮放因子 δo (預設 100)
+    Returns:
+        scaled_tf_vectors: list of list，每個文件的整數 TF 向量
+        tf_vectors_float: list of list，每個文件的浮點 TF 向量 (未縮放)
+    """
+    scaled_tf_vectors = []
+    tf_vectors_float = []
+
+    for doc in docs:
+        doc_len = len(doc)  # ||fi||
+        if doc_len == 0:
+            # 空文件，整個向量都設 0
+            scaled_tf_vectors.append([0] * len(vocab))
+            tf_vectors_float.append([0.0] * len(vocab))
+            continue
+
+        denom = 1 + math.log(doc_len)
+
+        tf_vector_float = []
+        tf_vector_scaled = []
+
+        for word in vocab:
+            count = doc.count(word)  # Nfi,wj
+
+            if count > 0:
+                tf_val = (1 + math.log(count)) / denom
+            else:
+                tf_val = 0.0
+
+            # 存原始浮點數
+            tf_vector_float.append(tf_val)
+
+            # 乘上 δo 並轉整數
+            scaled_tf_int = round(tf_val * scale)
+            tf_vector_scaled.append(max(0, scaled_tf_int))
+
+        scaled_tf_vectors.append(tf_vector_scaled)
+        tf_vectors_float.append(tf_vector_float)
+
+    return scaled_tf_vectors
 
 def compute_tfidf_vectors(tf_vectors, pres_vectors, scale=100):
     """

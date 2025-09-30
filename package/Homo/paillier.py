@@ -2,6 +2,7 @@
 import random
 from math import lcm
 from typing import Dict, Tuple,List
+from package.Homo.promise import PedersenVSS
 from package.Homo.utils import modinv,L, rand_coprime, generate_strong_primes, find_g
 
 Cipher = Tuple[int, int]  # (C1, C2)
@@ -19,7 +20,7 @@ class Paillier:
     @classmethod
     def keygen(cls, k: int = 64) -> "Paillier":
         p, q = generate_strong_primes(k)
-        lambda_dec  = lcm(p - 1, q - 1)       # ← λ
+        lambda_dec = lcm(p - 1, q - 1) # ← λ
         g_core, n, n2 = find_g(p, q, lambda_dec)
         # μ = (L(g^λ mod N^2))^{-1} mod N
         lu = L(pow((n + 1) % n2, lambda_dec, n2), n)
@@ -38,9 +39,24 @@ class Paillier:
         c2 = pow(self.g_core, r, self.n2)
         return (c1, c2)
 
-    def strong_decrypt(self, c1: int) -> int:
-        u = pow(c1, self.lambda_dec, self.n2)
+    def encrypt_pri(self, m: int, private: int, r: int | None = None) -> Cipher:
+        if not (0 <= m < self.n):
+            raise ValueError("message m 必須在 [0, N)")
+        if r is None:
+            r = rand_coprime(self.n)  # 近似 Z*_N
+
+        c1 = ((1 + m * self.n) % self.n2) * pow(self.g_core, r*private, self.n2) % self.n2
+        c2 = pow(self.g_core, r, self.n2)
+        return (c1, c2)
+
+    def strong_decrypt(self, c1: int, lambda_use: int = None) -> int:
+        """
+        若提供 lambda_use，則使用該值，否則使用 self.lambda_dec
+        """
+        lam = lambda_use if lambda_use is not None else self.lambda_dec
+        u = pow(c1, lam, self.n2)
         return (L(u, self.n) * self.mu) % self.n
+
 
     def weak_decrypt(self, c1: int, c2: int, theta_i: int) -> int:
         inv = modinv(pow(c2, theta_i, self.n2), self.n2)
@@ -65,11 +81,15 @@ class Paillier:
         return (pow(c1, k, self.n2), pow(c2, k, self.n2))
 
 class FunctionNode:
-    def __init__(self, id: int, paillier: Paillier, lambda_share: int, theta_share: int):
+    def __init__(self, id: int, paillier: Paillier,lambda_share: int, theta_share: int,
+                 pedersen_commit: int,v_i: int):
         self.id = id
         self.paillier = paillier
         self.lambda_share = lambda_share  # λ_i
         self.theta_share = theta_share    # θ_i
+        self.pedersen_commit = pedersen_commit  # α^s_i * β^v_i
+        self.v_i = v_i            # λ 的 Pedersen 隨機數
+        #self.v_i_prime = v_i_prime  # θ 的 Pedersen 隨機數
     
     def partial_decrypt(self, cipher_pair: Tuple[int,int]) -> Tuple[int,int]:
         c1, c2 = cipher_pair
@@ -86,7 +106,7 @@ class FunctionNode:
         """
         合併多個節點的部分解密結果，重建完整 Trapdoor 密文向量：
         partials: [(node_id, [(c1^λᵢ, c2^λᵢ), ...]), ...]
-        返回 [(c1^θ_TA, c2^θ_TA), ...]
+        返回 [(c1^λ, c2^λ), ...]
         """
         ids = [pid for pid, _ in partials]
         def lagrange_coeff(j):
@@ -109,6 +129,18 @@ class FunctionNode:
                 acc2 = (acc2 * pow(c2j, lj, n2)) % n2
             result.append((acc1, acc2))
         return result
+
+    def verify_share(self, vss: PedersenVSS, e0_l: int, es_l: list, e0_t: int, es_t: list, t: int) -> bool:
+        # 將 tuple 拆開，確保傳入單個整數
+        v_i_lambda = self.v_i[0]   # 對應 lambda 的隨機值
+        v_i_theta  = self.v_i[1]   # 對應 theta 的隨機值 (如果沒有 v_i_prime 就直接重用)
+
+        # 驗證 λ_share
+        valid_lambda = vss.verify(self.id, self.lambda_share, v_i_lambda, e0_l, es_l, t)
+        # 驗證 θ_share
+        valid_theta  = vss.verify(self.id, self.theta_share, v_i_theta, e0_t, es_t, t)
+        
+        return valid_lambda and valid_theta
 
 
 class Entity:

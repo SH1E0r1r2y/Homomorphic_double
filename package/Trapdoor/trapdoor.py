@@ -9,7 +9,7 @@ def generate_trapdoor(paillier, vocab_list, query_keywords, h):
     query_vector = [1 if kw in query_keywords else 0 for kw in vocab_list]
     encrypted_trapdoor = []
     for val in query_vector:
-        encrypted_trapdoor.append(paillier.encrypt(val, h))
+        encrypted_trapdoor.append(paillier.encrypt_pri(val, h))
     
     return encrypted_trapdoor
 
@@ -24,6 +24,7 @@ def encrypted_vector_match(paillier, enc_vector, trapdoor,init_enc):
     for (c1, c2), (t_c1, t_c2) in zip(enc_vector, trapdoor):
         # 解密 t_c1 得到 query 權重 (scale or 0)
         t_plain = paillier.strong_decrypt(t_c1)
+        #print(f"t_plain: {t_plain}")
         if t_plain != 0:
             # 同態乘法：E(m1) ⊗ E(m2) = E(m1 * m2)：E(doc_value) ^ t_plain = E(doc_value * t_plain)
             scaled = paillier.homomorphic_scalar_multiply((c1, c2), t_plain)
