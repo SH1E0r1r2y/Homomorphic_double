@@ -23,13 +23,18 @@ def homomorphic_sum(paillier, enc_vectors: list):
         summed = new_sum
     return summed
 
-
 def build_index_tree(paillier, doc_blocks):
     # 建立葉節點
-    leaves = [LeafNode(doc, doc["enc_tf"]) for doc in doc_blocks]
+    leaves = [LeafNode(doc, doc["enc_presence"]) for doc in doc_blocks]
+
+    # print(f"總 leaf 節點數量: {len(leaves)}")
+    # for i, leaf in enumerate(leaves):
+    #     print(f"Leaf {i}: doc_id={leaf.block['doc_id']}, enc_vector={leaf.enc_vector}")
 
     current_level = leaves
+    level = 0
     while len(current_level) > 1:
+        print(f"=== Level {level} 節點數量: {len(current_level)} ===")
         next_level = []
         for i in range(0, len(current_level), 2):
             children = current_level[i:i+2]
@@ -39,5 +44,18 @@ def build_index_tree(paillier, doc_blocks):
             node = InternalNode(children)
             node.enc_vector = enc_vec
             next_level.append(node)
+            print(f"InternalNode: children doc_ids={[c.block['doc_id'] for c in children] if hasattr(children[0],'block') else 'Inner'}")
+            #print(f"enc_vector={enc_vec}")
         current_level = next_level
+        level += 1
+
+    #print(f"=== 最終 root 節點 enc_vector: {current_level[0].enc_vector} ===")
     return current_level[0]
+
+def get_all_leaves(node):
+    if hasattr(node, "block"):  # 葉子節點有 block
+        return [node]
+    leaves = []
+    for child in getattr(node, "children", []):
+        leaves.extend(get_all_leaves(child))
+    return leaves

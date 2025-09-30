@@ -1,5 +1,5 @@
 # main.py
-from package.Homo.paillier import Paillier
+from package.Homo.paillier import Paillier,Entity
 from package.Homo.promise import PedersenVSS
 #from package.Dataprocess.dataprocessing import 
 
@@ -9,13 +9,14 @@ def paillier_commit(t: int = 3, d: int = 5):
     2) 使用系統公鑰 h_TA 進行加密
     3) 用 系統強私鑰(λ) 與 弱私鑰(theta_ta) 解密驗證
     """
-    paillier = Paillier.keygen(k=256)
+    paillier = Paillier.keygen(k=64)
     print("[*] System keys")
     print("N bits ~= ", paillier.n.bit_length())
 
-    ent = paillier.gen_entity_key()
-    n, g_core, h_i = ent["pk"]
-    theta_i = ent["sk_weak"]
+    #ent = paillier.gen_entity_key()
+    ent = Entity.register_data_owner(paillier, "Alice")
+    n, g_core, h_i = ent.pk
+    theta_i = ent.sk_weak
 
     m = 15005468827 % n
     c1, c2 = paillier.encrypt(m, paillier.h_ta)
@@ -35,7 +36,7 @@ def paillier_commit(t: int = 3, d: int = 5):
       shares: (i, λ_i, v_i), (i, θ_i, v'_i)
     """
     # 2) 產生 VSS 參數 (p, q, α, β) —— 同一組參數同時承諾/分享 λ 與 θ_TA
-    vss = PedersenVSS.keygen(min_q_bits=256)
+    vss = PedersenVSS.keygen(min_q_bits=64)
 
     # 3) 依群階 q 取值（Pedersen 承諾的秘密皆在 Z_q 上）
     s_lambda = paillier.lambda_dec % vss.q

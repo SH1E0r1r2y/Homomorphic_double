@@ -2,6 +2,7 @@
 import random
 from math import lcm
 from typing import Dict, Tuple,List
+from package.Homo.promise import PedersenVSS
 from package.Homo.utils import modinv,L, rand_coprime, generate_strong_primes, find_g
 
 Cipher = Tuple[int, int]  # (C1, C2)
@@ -38,8 +39,10 @@ class Paillier:
         c2 = pow(self.g_core, r, self.n2)
         return (c1, c2)
 
-    def strong_decrypt(self, c1: int) -> int:
-        u = pow(c1, self.lambda_dec, self.n2)
+    def strong_decrypt(self, c: Tuple[int,int], lambda_override: int = None) -> int:
+        c1, c2 = c
+        λ = lambda_override if lambda_override is not None else self.lambda_dec
+        u = pow(c1, λ, self.n2)
         return (L(u, self.n) * self.mu) % self.n
 
     def weak_decrypt(self, c1: int, c2: int, theta_i: int) -> int:
@@ -47,7 +50,7 @@ class Paillier:
         val = (c1 * inv) % self.n2
         return L(val,self.n)
 
-    def ciphertext_refresh(self, c: Cipher, h: int, r_prime: int | None = None) -> Cipher:
+    def refresh(self, c: Cipher, h: int, r_prime: int | None = None) -> Cipher:
         if r_prime is None:
             r_prime = rand_coprime(self.n)
         c1, c2 = c
@@ -55,60 +58,122 @@ class Paillier:
         c2p = (c2 * pow(self.g_core, r_prime, self.n2)) % self.n2
         return (c1p, c2p)
 
-    @staticmethod
-    def homomorphic_add(ca: Cipher, cb: Cipher, n2: int) -> Cipher:
-        c1a, c2a = ca
-        c1b, c2b = cb
-        return ((c1a * c1b) % n2, (c2a * c2b) % n2)
     def homomorphic_scalar_multiply(self, cipher: Cipher, k: int) -> Cipher:
         c1, c2 = cipher
         return (pow(c1, k, self.n2), pow(c2, k, self.n2))
+    
+    @staticmethod
+    def homomorphic_multiply(ca: tuple, cb: tuple, n2: int) -> tuple:
+        """
+        密文 × 密文 (同態加法性質)：E(m1) * E(m2) = E(m1 + m2)
+        """
+        c1a, c2a = ca
+        c1b, c2b = cb
+        return ((c1a * c1b) % n2, (c2a * c2b) % n2)
+
+    @staticmethod
+    def homomorphic_subtract(ca: tuple, cb: tuple, n2: int) -> tuple:
+        """
+        同態減法：E(m1) * E(-m2) = E(m1 - m2)
+        """
+        c1a, c2a = ca
+        c1b, c2b = cb
+        # pow(c2b, n2-1, n2) 相當於取負數 (模 n2)
+        return ((c1a * pow(c1b, n2-1, n2)) % n2,
+                (c2a * pow(c2b, n2-1, n2)) % n2)
+
+    @staticmethod
+    def homomorphic_add(ca: tuple, cb: tuple, n2: int) -> tuple:
+        """
+        同態加法：E(m1) * E(m2) = E(m1 + m2)
+        """
+        c1a, c2a = ca
+        c1b, c2b = cb
+        return ((c1a * c1b) % n2, (c2a * c2b) % n2)
 
 class FunctionNode:
-    def __init__(self, id: int, paillier: Paillier, lambda_share: int, theta_share: int):
+    def __init__(self, id: int, paillier: Paillier,
+                 lambda_share: int, theta_share: int,
+                 pedersen_commit: int,
+                 v_i: int, v_i_prime: int):
         self.id = id
         self.paillier = paillier
         self.lambda_share = lambda_share  # λ_i
         self.theta_share = theta_share    # θ_i
-    
-    def partial_decrypt(self, cipher_pair: Tuple[int,int]) -> Tuple[int,int]:
+        self.pedersen_commit = pedersen_commit  # α^s_i * β^v_i
+        self.v_i = v_i            # λ 的 Pedersen 隨機數
+        self.v_i_prime = v_i_prime  # θ 的 Pedersen 隨機數
+
+
+    def verify_share(self, vss: PedersenVSS, e0_l: int, es_l: List[int], e0_t: int, es_t: List[int], t: int) -> bool:
+        """
+        使用 PedersenVSS 驗證 share 是否正確
+        - e0_l, es_l: λ 的 Pedersen 承諾
+        - e0_t, es_t: θ 的 Pedersen 承諾
+        """
+        # 驗證 λ_share
+        valid_lambda = vss.verify(self.id, self.lambda_share, self.v_i, e0_l, es_l, t)
+        # 驗證 θ_share
+        valid_theta  = vss.verify(self.id, self.theta_share, self.v_i_prime, e0_t, es_t, t)
+        
+        return valid_lambda and valid_theta
+
+    def refresh(self, cipher_pair: Tuple[int,int]) -> Tuple[int,int]:
+        """
+        1) 使用節點弱私鑰 θ_i 部分解密
+        2) 再用系統公鑰隨機加密生成新密文
+        """
+        c1, c2 = cipher_pair
+
+        # 部分解密
+        partial_plain = self.paillier.weak_decrypt(c1, c2, self.theta_share)
+
+        # 隨機再加密
+        r_new = random.randint(1, self.paillier.n // 4)
+        c1_new, c2_new = self.paillier.encrypt(partial_plain, self.paillier.h_ta, r_new)
+
+        return (c1_new, c2_new)
+
+    def partial_decrypt(self, cipher_pair: Tuple[int, int]) -> Tuple[int, int]:
+        """使用 λ_i 對 ciphertext 做部分解密"""
         c1, c2 = cipher_pair
         return (
             pow(c1, self.lambda_share, self.paillier.n2),
-            pow(c2, self.lambda_share, self.paillier.n2)
+            pow(c2, self.lambda_share, self.paillier.n2),
         )
+        
+    # @staticmethod
+    # def combine_shares(
+    #     partials: List[Tuple[int, List[Tuple[int, int]]]],
+    #     n2: int
+    # ) -> List[Tuple[int, int]]:
+    #     """
+    #     合併多個節點的部分解密結果，重建完整明文 (僅在排序階段需要)
+    #     partials: [(node_id, [(c1^λᵢ, c2^λᵢ), ...]), ...]
+    #     返回 [(c1, c2), ...] → 可還原 TF 值
+    #     """
+    #     ids = [pid for pid, _ in partials]
 
-    @staticmethod
-    def combine_trapdoor(
-        partials: List[Tuple[int, List[Tuple[int,int]]]],
-        n2: int
-    ) -> List[Tuple[int,int]]:
-        """
-        合併多個節點的部分解密結果，重建完整 Trapdoor 密文向量：
-        partials: [(node_id, [(c1^λᵢ, c2^λᵢ), ...]), ...]
-        返回 [(c1^θ_TA, c2^θ_TA), ...]
-        """
-        ids = [pid for pid, _ in partials]
-        def lagrange_coeff(j):
-            num, den = 1, 1
-            for m in ids:
-                if m != j:
-                    num = (num * (-m)) % n2
-                    den = (den * (j - m)) % n2
-            return num * pow(den, -1, n2) % n2
+    #     def lagrange_coeff(j):
+    #         num, den = 1, 1
+    #         for m in ids:
+    #             if m != j:
+    #                 num = (num * (-m)) % n2
+    #                 den = (den * (j - m)) % n2
+    #         return num * pow(den, -1, n2) % n2
 
-        part_dict = {pid: vec for pid, vec in partials}
-        length = len(next(iter(part_dict.values())))
-        result = []
-        for idx in range(length):
-            acc1, acc2 = 1, 1
-            for j, vec in part_dict.items():
-                lj = lagrange_coeff(j)
-                c1j, c2j = vec[idx]
-                acc1 = (acc1 * pow(c1j, lj, n2)) % n2
-                acc2 = (acc2 * pow(c2j, lj, n2)) % n2
-            result.append((acc1, acc2))
-        return result
+    #     part_dict = {pid: vec for pid, vec in partials}
+    #     length = len(next(iter(part_dict.values())))
+    #     result = []
+    #     for idx in range(length):
+    #         acc1, acc2 = 1, 1
+    #         for j, vec in part_dict.items():
+    #             lj = lagrange_coeff(j)
+    #             c1j, c2j = vec[idx]
+    #             acc1 = (acc1 * pow(c1j, lj, n2)) % n2
+    #             acc2 = (acc2 * pow(c2j, lj, n2)) % n2
+    #         result.append((acc1, acc2))
+    #     return result
 
 
 class Entity:
