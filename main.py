@@ -96,6 +96,7 @@ def build_blockchain_data(do: Entity, paillier: Paillier, cid_map,vocab, enc_tf,
     duration = time.time() - start
     log("Blockchain", "建立索引樹", duration)
     return root
+
 def simulate_du_query(du: Entity, paillier: Paillier, vocab, root, fns, t: int, vss=None,
                       e0_l=None, es_l=None, e0_t=None, es_t=None):
     import time
@@ -123,34 +124,33 @@ def simulate_du_query(du: Entity, paillier: Paillier, vocab, root, fns, t: int, 
     seta_shares = [(fn.id, fn.theta_share) for fn in participants]
     seta_recov = vss.recover(seta_shares, t)
 
-    print(f"\n[Debug] 重建 λ = {lambda_recov}")
-    print(f"[Debug] λ 原始: {paillier.lambda_dec}")
-    print(f"[Debug] 重建 θ = {seta_recov}")
-    print(f"[Debug] θ 原始: {paillier.theta_ta}")
-
     # Step 4. 強解密 Trapdoor 向量 (得到 T_plain，通常是 0/1 向量)
-    T_plain = [paillier.strong_decrypt(c[0], lambda_recov) for c in ET]
+    T_plain = [paillier.strong_decrypt(ciphertext, lambda_recov) for ciphertext in ET]
     
     print("[Debug] T_plain (解密後的陷門向量):")
     print(T_plain)
 
     log(f"DU {du.id}", "閾值解密 & 強解密 Trapdoor", time.time() - start)
 
-    # Step 5. 生成 Simplified ET (只保留 T[j]==1 的位置)
+    # Step 5. 保留原始維度 (m)，只在 T[j]==1 的位置放 ET，其餘用 (1,1)
     start = time.time()
-    simplified_ET = []
-    for idx, val in enumerate(T_plain):
-        if val == 1:
-            ct = paillier.encrypt(1, paillier.h_ta)
-            simplified_ET.append((idx, ct))
+    simplified_ET = [
+        ET[idx] if val == 1 else (1, 1)
+        for idx, val in enumerate(T_plain)
+    ]
 
+    print(f"[Debug] simplified ET (只保留 T[j]==1 的位置): {simplified_ET}")
     log(f"DU {du.id}", f"生成 simplified ET (count={len(simplified_ET)})", time.time() - start)
 
     # Step 6. 搜尋
     start = time.time()
     init_enc = paillier.encrypt(0, paillier.h_ta)
-    results = gbfs_search(paillier, root, simplified_ET, init_enc, top_k=5)
+    results = gbfs_search(paillier, root, simplified_ET, seta_recov, top_k=5, t_plain=T_plain)
     log(f"DU {du.id}", "執行搜尋", time.time() - start)
+    # 輸出結果
+    print_stage("搜尋結果")
+    for score, cid, doc_id in results:
+        print(f"匹配度: {score}, CID: {cid}, doc_id: {doc_id}")
     return results
 
 if __name__ == "__main__":

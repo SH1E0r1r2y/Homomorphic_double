@@ -49,14 +49,19 @@ class Paillier:
         c2 = pow(self.g_core, r, self.n2)
         return (c1, c2)
 
-    def strong_decrypt(self, c1: int, lambda_use: int = None) -> int:
+    def strong_decrypt(self, ciphertext: Tuple[int, int], lambda_use: int = None) -> int:
         """
-        若提供 lambda_use，則使用該值，否則使用 self.lambda_dec
+        使用強私鑰 λ 解密 Paillier 密文 (c1, c2)。
+        若提供 lambda_use，則使用該值，否則使用 self.lambda_dec。
         """
+        if not isinstance(ciphertext, tuple) or len(ciphertext) != 2:
+            raise ValueError("ciphertext 必須是 (c1, c2) 的元組")
+        c1, c2 = ciphertext
         lam = lambda_use if lambda_use is not None else self.lambda_dec
+        # 計算 u = C1^λ mod N^2
         u = pow(c1, lam, self.n2)
-        return (L(u, self.n) * self.mu) % self.n
-
+        # 使用 L 函數和 μ 計算明文
+        return (L(u,self.n) * self.mu) % self.n
 
     def weak_decrypt(self, c1: int, c2: int, theta_i: int) -> int:
         inv = modinv(pow(c2, theta_i, self.n2), self.n2)
